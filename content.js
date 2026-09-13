@@ -25,6 +25,8 @@
     hoverTimer: null,
     lastBigIndex: -Infinity,
     lastBigSide: null,
+    introDone: false,
+    introQueue: [],
   };
 
   /* ------------------------------------------------------------------ */
@@ -275,6 +277,8 @@
     state.scrollYBefore = window.scrollY;
     state.lastBigIndex = -Infinity;
     state.lastBigSide = null;
+    state.introDone = false;
+    state.introQueue = [];
 
     const info = channelInfo();
     const host = h('div', { id: HOST_ID });
@@ -333,11 +337,15 @@
 
     state.els = { wrap, bgA, bgB, top, grid, foot, spinner, moreBtn, footNote, cinema, stageImg, stageFrame, capTitle, capMeta, strip, segGrid, segCinema, cap };
 
-    // Fond initial : bannière de la chaîne, puis première miniature.
-    if (info.banner) setBackdrop(info.banner);
-
     appendVideos(collectVideos());
-    if (!info.banner && state.videos[0]) setBackdrop(state.videos[0].fallback);
+
+    // Entrée en scène : rideau noir immédiat, puis le fond ambiant s'allume
+    // (double rAF pour que la transition d'opacité soit bien jouée).
+    const firstBg = info.banner || state.videos[0]?.fallback;
+    if (firstBg) requestAnimationFrame(() => requestAnimationFrame(() => { if (state.open) setBackdrop(firstBg); }));
+    // Les cartes du premier écran apparaissent ensemble, en cascade, dès que
+    // leurs images sont là (ou après 1,8 s au plus tard).
+    setTimeout(finishIntro, 1800);
 
     document.addEventListener('keydown', onKeyDown, true);
     wrap.focus({ preventScroll: true });
@@ -358,7 +366,7 @@
     const { wrap } = state.els;
     wrap.classList.add('is-closing');
     const host = state.host;
-    setTimeout(() => host.remove(), 450);
+    setTimeout(() => host.remove(), 240);
     window.scrollTo({ top: state.scrollYBefore, behavior: 'instant' });
     state.host = null; state.root = null; state.els = {};
   }
@@ -397,8 +405,8 @@
   }
 
   /* --- grille --- */
-  function makeThumbImg(video, onReady) {
-    const img = h('img', { alt: '', loading: 'lazy', decoding: 'async' });
+  function makeThumbImg(video, onReady, eager = false) {
+    const img = h('img', { alt: '', loading: eager ? 'eager' : 'lazy', decoding: 'async' });
     img.addEventListener('load', () => {
       // maxresdefault absent → YouTube renvoie un placeholder 120×90.
       if (img.naturalWidth < 300 && img.src !== video.fallback) { img.src = video.fallback; return; }
@@ -406,9 +414,38 @@
       img.classList.add('is-loaded');
       onReady?.(img);
     });
-    img.addEventListener('error', () => { if (img.src !== video.fallback) img.src = video.fallback; });
+    img.addEventListener('error', () => {
+      if (img.src !== video.fallback) img.src = video.fallback;
+      else onReady?.(img); // image introuvable : on montre quand même la carte
+    });
     img.src = video.src;
     return img;
+  }
+
+  /* --- entrée en scène --- */
+  const INTRO_COUNT = 12; // cartes du premier écran révélées ensemble
+
+  function revealCard(card, delay) {
+    card.style.setProperty('--d', String(delay));
+    card.classList.add('is-ready');
+  }
+
+  function onCardReady(card, indexInBatch) {
+    if (!state.open) return;
+    if (!state.introDone) {
+      state.introQueue.push(card);
+      if (state.introQueue.length >= Math.min(INTRO_COUNT, state.videos.length)) finishIntro();
+      return;
+    }
+    // Après l'intro : légère cascade au sein d'un batch fraîchement chargé.
+    revealCard(card, Math.min(indexInBatch, 12) * 35);
+  }
+
+  function finishIntro() {
+    if (!state.open || state.introDone) return;
+    state.introDone = true;
+    const cards = state.introQueue.splice(0).sort((a, b) => Number(a.dataset.index) - Number(b.dataset.index));
+    cards.forEach((card, i) => revealCard(card, 250 + i * 55));
   }
 
   function appendVideos(list) {
@@ -425,13 +462,13 @@
 
       const metaLine = [v.big ? 'Populaire' : '', v.duration, v.meta].filter(Boolean).join('  ·  ');
       const card = h('a', {
-        class: 'ytc-card' + bigClass, href: v.href, style: `--i:${Math.min(i, 24)}`,
+        class: 'ytc-card' + bigClass, href: v.href, dataset: { index: String(idx) },
         onclick: (e) => onCardClick(e, v),
         onmouseenter: () => hoverBackdrop(v),
         oncontextmenu: (e) => { e.preventDefault(); state.index = idx; setView('cinema'); },
       },
         h('div', { class: 'ytc-thumb' },
-          makeThumbImg(v),
+          makeThumbImg(v, () => onCardReady(card, i), base === 0 && i < INTRO_COUNT),
           h('div', { class: 'ytc-caption' },
             h('div', { class: 'ytc-title', text: v.title }),
             metaLine ? h('div', { class: 'ytc-meta', text: metaLine }) : null,

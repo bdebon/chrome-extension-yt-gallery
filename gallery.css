@@ -33,10 +33,10 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   font-size: 14px;
   line-height: 1.4;
   -webkit-font-smoothing: antialiased;
-  opacity: 0;
-  animation: ytc-fade 0.9s ease forwards;
 }
-.ytc.is-closing { animation: ytc-fade-out 0.45s ease forwards; }
+/* Sortie : le contenu s'éteint, puis le rideau disparaît d'un coup. */
+.ytc.is-closing > :not(.ytc-bg):not(.ytc-veil):not(.ytc-grain) { animation: ytc-fade-out 0.22s ease forwards; }
+.ytc.is-closing .ytc-bg { opacity: 0; transition-duration: 0.3s; }
 
 @keyframes ytc-fade { to { opacity: 1; } }
 @keyframes ytc-fade-out { from { opacity: 1; } to { opacity: 0; } }
@@ -85,6 +85,7 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
   animation: ytc-rise 1s var(--ease) both;
+  animation-delay: 0.35s;
 }
 .ytc-avatar {
   width: 40px; height: 40px;
@@ -181,13 +182,16 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 }
 
 .ytc-card {
-  --i: 0;
+  --d: 0; /* délai d'apparition en ms, fixé par le script */
   display: block;
   text-decoration: none;
   color: inherit;
   outline: none;
-  animation: ytc-rise 0.9s var(--ease) both;
-  animation-delay: calc(var(--i) * 45ms);
+  opacity: 0; /* invisible tant que l'image n'est pas chargée */
+}
+.ytc-card.is-ready {
+  animation: ytc-rise 1.1s var(--ease) both;
+  animation-delay: calc(var(--d) * 1ms);
 }
 @keyframes ytc-rise {
   from { opacity: 0; transform: translateY(18px); }
@@ -208,11 +212,9 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   width: 100%;
   height: 100%;
   object-fit: cover;
-  opacity: 0;
   transform: scale(1);
-  transition: opacity 1s ease, transform 1.6s var(--ease);
+  transition: transform 1.6s var(--ease);
 }
-.ytc-thumb img.is-loaded { opacity: 1; }
 .ytc-card:hover .ytc-thumb img,
 .ytc-card:focus-visible .ytc-thumb img { transform: scale(1.06); }
 
@@ -418,6 +420,6 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ytc, .ytc-card, .ytc-top, .ytc-cap { animation: none !important; opacity: 1; }
+  .ytc-card.is-ready, .ytc-top, .ytc-cap { animation: none !important; opacity: 1; }
   .ytc-thumb, .ytc-thumb img, .ytc-bg { transition: none !important; }
 }
