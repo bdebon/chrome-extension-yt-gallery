@@ -26,7 +26,10 @@
     lastBigIndex: -Infinity,
     lastBigSide: null,
     introDone: false,
-    introQueue: [],
+    loadedCards: new Map(), // index → carte dont l'image est chargée, en attente de révélation
+    revealPtr: 0,           // prochain index à révéler (ordre de la grille)
+    nextRevealAt: 0,        // horloge de cascade
+    stallTimer: null,
   };
 
   /* ------------------------------------------------------------------ */
@@ -252,21 +255,22 @@
   /* Galerie                                                             */
   /* ------------------------------------------------------------------ */
 
-  function stylesheetNode() {
+  // La feuille de style est chargée dès le départ et injectée en <style> :
+  // avec un <link>, la galerie se peignait une fraction de seconde sans style.
+  let cssPromise = null;
+  function loadCss() {
+    if (cssPromise) return cssPromise;
     if (typeof chrome !== 'undefined' && chrome.runtime?.getURL) {
-      const url = chrome.runtime.getURL('gallery.css');
-      const link = h('link', { rel: 'stylesheet', href: url });
-      // Repli si la feuille est bloquée : on injecte le texte CSS dans un <style>.
-      link.addEventListener('error', async () => {
-        try { const css = await (await fetch(url)).text(); link.replaceWith(h('style', { text: css })); } catch (_) { /* ignore */ }
-      });
-      return link;
+      cssPromise = fetch(chrome.runtime.getURL('gallery.css')).then((r) => r.text()).catch(() => '');
+    } else {
+      cssPromise = Promise.resolve(window.__ytcCss || ''); // mode test
     }
-    // Mode test (script injecté à la main) : CSS fourni dans window.__ytcCss
-    return h('style', { text: window.__ytcCss || '' });
+    return cssPromise;
   }
 
-  function openGallery() {
+  async function openGallery() {
+    if (state.open) return;
+    const css = await loadCss();
     if (state.open) return;
     state.open = true;
     state.view = 'grid';
@@ -278,7 +282,10 @@
     state.lastBigIndex = -Infinity;
     state.lastBigSide = null;
     state.introDone = false;
-    state.introQueue = [];
+    state.loadedCards = new Map();
+    state.revealPtr = 0;
+    state.nextRevealAt = 0;
+    clearTimeout(state.stallTimer);
 
     const info = channelInfo();
     const host = h('div', { id: HOST_ID });
@@ -332,8 +339,13 @@
       top, grid, foot, cinema,
     );
 
-    root.append(stylesheetNode(), wrap);
+    // Rideau noir qui se ferme en fondu (350 ms) ; rien d'autre n'est visible
+    // pendant ce temps, les cartes et l'en-tête n'arrivent qu'après.
+    host.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:#0b0b0d;opacity:0;transition:opacity .35s ease';
+    root.append(h('style', { text: css }), wrap);
     document.documentElement.append(host);
+    state.openedAt = performance.now();
+    requestAnimationFrame(() => requestAnimationFrame(() => { host.style.opacity = '1'; }));
 
     state.els = { wrap, bgA, bgB, top, grid, foot, spinner, moreBtn, footNote, cinema, stageImg, stageFrame, capTitle, capMeta, strip, segGrid, segCinema, cap };
 
@@ -345,10 +357,11 @@
     if (firstBg) requestAnimationFrame(() => requestAnimationFrame(() => { if (state.open) setBackdrop(firstBg); }));
     // Les cartes du premier écran apparaissent ensemble, en cascade, dès que
     // leurs images sont là (ou après 1,8 s au plus tard).
-    setTimeout(finishIntro, 1800);
+    setTimeout(finishIntro, INTRO_TIMEOUT);
 
     document.addEventListener('keydown', onKeyDown, true);
     wrap.focus({ preventScroll: true });
+    loadCss(); // précharge pour les ouvertures suivantes
 
     // Chargement automatique en approchant du bas.
     const io = new IntersectionObserver((entries) => {
@@ -363,10 +376,13 @@
     state.open = false;
     document.removeEventListener('keydown', onKeyDown, true);
     state.io?.disconnect();
+    clearTimeout(state.stallTimer);
     const { wrap } = state.els;
     wrap.classList.add('is-closing');
     const host = state.host;
-    setTimeout(() => host.remove(), 240);
+    // Sortie symétrique : le contenu s'éteint, puis le rideau s'ouvre en fondu.
+    setTimeout(() => { host.style.opacity = '0'; }, 200);
+    setTimeout(() => host.remove(), 560);
     window.scrollTo({ top: state.scrollYBefore, behavior: 'instant' });
     state.host = null; state.root = null; state.els = {};
   }
@@ -423,29 +439,61 @@
   }
 
   /* --- entrée en scène --- */
-  const INTRO_COUNT = 12; // cartes du premier écran révélées ensemble
+  // Une seule horloge révèle les cartes dans l'ordre de la grille, une par
+  // une, quelle que soit la vitesse de chargement des images.
+  const INTRO_COUNT = 12;   // cartes du premier écran attendues avant de démarrer
+  const INTRO_TIMEOUT = 1800;
+  const REVEAL_STEP = 55;   // ms entre deux cartes
+  const STALL_TIMEOUT = 1200; // au-delà, on saute une image qui traîne
 
   function revealCard(card, delay) {
-    card.style.setProperty('--d', String(delay));
+    card.style.setProperty('--d', String(Math.round(delay)));
     card.classList.add('is-ready');
   }
 
-  function onCardReady(card, indexInBatch) {
+  function scheduleReveal(card) {
+    const now = performance.now();
+    const at = Math.max(now, state.nextRevealAt);
+    state.nextRevealAt = at + REVEAL_STEP;
+    revealCard(card, at - now);
+  }
+
+  function onCardReady(card, index) {
     if (!state.open) return;
-    if (!state.introDone) {
-      state.introQueue.push(card);
-      if (state.introQueue.length >= Math.min(INTRO_COUNT, state.videos.length)) finishIntro();
-      return;
-    }
-    // Après l'intro : légère cascade au sein d'un batch fraîchement chargé.
-    revealCard(card, Math.min(indexInBatch, 12) * 35);
+    if (index < state.revealPtr) { scheduleReveal(card); return; } // sautée plus tôt, elle arrive enfin
+    state.loadedCards.set(index, card);
+    pumpReveals();
   }
 
   function finishIntro() {
     if (!state.open || state.introDone) return;
     state.introDone = true;
-    const cards = state.introQueue.splice(0).sort((a, b) => Number(a.dataset.index) - Number(b.dataset.index));
-    cards.forEach((card, i) => revealCard(card, 250 + i * 55));
+    // Jamais avant la fin du rideau : au moins 650 ms après l'ouverture.
+    state.nextRevealAt = Math.max(performance.now() + 250, state.openedAt + 650);
+    pumpReveals();
+  }
+
+  function pumpReveals() {
+    if (!state.open) return;
+    if (!state.introDone) {
+      if (state.loadedCards.size >= Math.min(INTRO_COUNT, state.videos.length)) finishIntro();
+      return;
+    }
+    while (state.loadedCards.has(state.revealPtr)) {
+      scheduleReveal(state.loadedCards.get(state.revealPtr));
+      state.loadedCards.delete(state.revealPtr);
+      state.revealPtr++;
+    }
+    // Garde-fou : si des cartes plus loin sont prêtes mais qu'une image traîne,
+    // on saute cette dernière au bout d'un moment (elle apparaîtra à son arrivée).
+    clearTimeout(state.stallTimer);
+    if (state.loadedCards.size) {
+      state.stallTimer = setTimeout(() => {
+        if (!state.open || !state.loadedCards.size) return;
+        state.revealPtr = Math.min(...state.loadedCards.keys());
+        pumpReveals();
+      }, STALL_TIMEOUT);
+    }
   }
 
   function appendVideos(list) {
@@ -468,7 +516,7 @@
         oncontextmenu: (e) => { e.preventDefault(); state.index = idx; setView('cinema'); },
       },
         h('div', { class: 'ytc-thumb' },
-          makeThumbImg(v, () => onCardReady(card, i), base === 0 && i < INTRO_COUNT),
+          makeThumbImg(v, () => onCardReady(card, idx), base === 0),
           h('div', { class: 'ytc-caption' },
             h('div', { class: 'ytc-title', text: v.title }),
             metaLine ? h('div', { class: 'ytc-meta', text: metaLine }) : null,
@@ -618,4 +666,5 @@
   mo.observe(document.body, { childList: true, subtree: true });
 
   onNavigate();
+  if (isVideosTab()) loadCss();
 })();
