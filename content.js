@@ -90,6 +90,40 @@
 
   function textOf(el) { return el ? el.textContent.replace(/\s+/g, ' ').trim() : ''; }
 
+  // « 6,1 k vues », « 6.1k views », « 1,2 M de vues », « 12 345 vues » → nombre.
+  function parseViews(text) {
+    if (!text) return 0;
+    const m = text.match(/([\d]+(?:[\s.,]\d+)*)\s*(k|K|M|Mio|Mrd|B|万|億)?/u);
+    if (!m) return 0;
+    let num = m[1].replace(/\s/gu, '');
+    const hasDot = num.includes('.'), hasComma = num.includes(',');
+    if (hasDot && hasComma) num = num.replace(/[.,]/g, (c, i, str) => (i === Math.max(str.lastIndexOf('.'), str.lastIndexOf(',')) ? '.' : ''));
+    else if (hasDot || hasComma) {
+      const sep = hasDot ? '.' : ',';
+      const after = num.split(sep).pop();
+      num = after.length === 3 && !m[2] ? num.replace(/[.,]/g, '') : num.replace(',', '.');
+    }
+    const n = parseFloat(num);
+    if (!isFinite(n)) return 0;
+    const mult = { k: 1e3, K: 1e3, M: 1e6, Mio: 1e6, Mrd: 1e9, B: 1e9, '万': 1e4, '億': 1e8 }[m[2]] || 1;
+    return Math.round(n * mult);
+  }
+
+  // Les vidéos qui se démarquent du batch par leurs vues (≥ 1,5 × la médiane),
+  // limitées à environ une sur huit pour garder une grille lisible. Si rien ne
+  // dépasse le seuil, la meilleure est retenue dès qu'elle fait 1,25 × la médiane.
+  function pickOutliers(list) {
+    const withViews = list.filter((v) => v.views > 0);
+    if (withViews.length < 6) return new Set();
+    const sorted = withViews.map((v) => v.views).sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    const limit = Math.max(1, Math.ceil(list.length / 8));
+    const ranked = withViews.slice().sort((a, b) => b.views - a.views);
+    let chosen = ranked.filter((v) => v.views >= median * 1.5).slice(0, limit);
+    if (!chosen.length && ranked[0].views >= median * 1.25) chosen = [ranked[0]];
+    return new Set(chosen.map((v) => v.id));
+  }
+
   function collectVideos() {
     const seen = new Set(state.videos.map((v) => v.id));
     const found = [];
@@ -114,12 +148,15 @@
         '.ytContentMetadataViewModelMetadataText, #metadata-line span, .inline-metadata-item'
       )].map(textOf).filter(Boolean);
       const meta = metaSpans.join(' · ');
+      const viewsText = metaSpans.find((t) => /vue|view|visual|aufruf|visualiz|weergav|visning|wyświetl|просмотр|回視聴|次观看|조회/i.test(t)) || metaSpans[0] || '';
+      const views = parseViews(viewsText);
 
       found.push({
         id,
         title,
         duration,
         meta,
+        views,
         href: anchors[0].getAttribute('href'),
         anchor: titleEl && titleEl.tagName === 'A' ? titleEl : anchors[0],
         src: `https://i.ytimg.com/vi/${id}/maxresdefault.jpg`,
@@ -363,14 +400,16 @@
     if (!list.length) return;
     const { grid, strip } = state.els;
     const base = state.videos.length;
+    const big = pickOutliers(list);
     for (let i = 0; i < list.length; i++) {
       const v = list[i];
       const idx = base + i;
       state.videos.push(v);
+      v.big = big.has(v.id);
 
-      const metaLine = [v.duration, v.meta].filter(Boolean).join('  ·  ');
+      const metaLine = [v.big ? 'Populaire' : '', v.duration, v.meta].filter(Boolean).join('  ·  ');
       const card = h('a', {
-        class: 'ytc-card', href: v.href, style: `--i:${Math.min(i, 24)}`,
+        class: v.big ? 'ytc-card is-big' : 'ytc-card', href: v.href, style: `--i:${Math.min(i, 24)}`,
         onclick: (e) => onCardClick(e, v),
         onmouseenter: () => hoverBackdrop(v),
         oncontextmenu: (e) => { e.preventDefault(); state.index = idx; setView('cinema'); },
