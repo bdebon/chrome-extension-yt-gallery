@@ -1,0 +1,8 @@
+# Files excluded from the release zip (git archive)
+.github/           export-ignore
+.gitattributes     export-ignore
+.gitignore         export-ignore
+release-please-config.json   export-ignore
+.release-please-manifest.json export-ignore
+CHANGELOG.md       export-ignore
+version.txt        export-ignore
