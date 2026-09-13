@@ -303,6 +303,9 @@
     const segGrid = h('button', { type: 'button', class: 'is-active', text: 'Grille', onclick: () => setView('grid') });
     const segCinema = h('button', { type: 'button', text: 'Cinéma', onclick: () => setView('cinema') });
     const seg = h('div', { class: 'ytc-seg' }, segGrid, segCinema);
+    // Démo (temporaire) : compare 720p et HD d'un clic, ou avec la touche H.
+    const hdToggle = h('button', { type: 'button', class: 'ytc-hd-toggle is-on ytc-hidden', title: 'Afficher / masquer la version HD (H)', onclick: toggleHd },
+      h('span', { text: 'HD' }), h('span', { class: 'ytc-kbd', text: 'H' }));
 
     const top = h('div', { class: 'ytc-top' },
       info.avatar ? h('img', { class: 'ytc-avatar', src: info.avatar, alt: '' }) : null,
@@ -312,6 +315,7 @@
       ),
       h('div', { class: 'ytc-spacer' }),
       seg,
+      hdToggle,
       h('button', { type: 'button', class: 'ytc-close', onclick: closeGallery },
         h('span', { text: 'Quitter' }), h('span', { class: 'ytc-kbd', text: 'Échap' })),
     );
@@ -354,7 +358,7 @@
     state.openedAt = performance.now();
     if (!resume) requestAnimationFrame(() => requestAnimationFrame(() => { host.style.opacity = '1'; }));
 
-    state.els = { wrap, bgA, bgB, top, grid, foot, spinner, moreBtn, footNote, cinema, stageImg, stageHd, stageFrame, capTitle, capMeta, strip, seg, segGrid, segCinema, cap };
+    state.els = { wrap, bgA, bgB, top, grid, foot, spinner, moreBtn, footNote, cinema, stageImg, stageHd, stageFrame, capTitle, capMeta, strip, seg, segGrid, segCinema, cap, hdToggle };
 
     appendVideos(collectVideos());
 
@@ -413,6 +417,7 @@
     cinema.classList.toggle('ytc-hidden', !isCinema);
     segGrid.classList.toggle('is-active', !isCinema);
     segCinema.classList.toggle('is-active', isCinema);
+    state.els.hdToggle.classList.toggle('ytc-hidden', !isCinema);
     wrap.style.overflowY = isCinema ? 'hidden' : 'auto';
     if (isCinema) showIndex(state.index);
   }
@@ -676,10 +681,18 @@
     return p;
   }
 
+  // Démo (temporaire) : bascule l'affichage de la couche HD.
+  function toggleHd() {
+    const { wrap, hdToggle, stageHd } = state.els;
+    stageHd.classList.add('is-instant'); // avant / après sans fondu, jusqu'à la vidéo suivante
+    const off = wrap.classList.toggle('is-hd-off');
+    hdToggle.classList.toggle('is-on', !off);
+  }
+
   function showHd(video) {
     const { stageHd } = state.els;
     const token = ++state.hdToken;
-    stageHd.classList.remove('is-loaded');
+    stageHd.classList.remove('is-loaded', 'is-instant');
     stageHd.removeAttribute('src');
     requestHd(video, 2).then((dataUrl) => {
       if (!dataUrl || token !== state.hdToken || !state.open) return;
@@ -737,6 +750,7 @@
       case 'ArrowRight': if (cinema) { e.preventDefault(); e.stopPropagation(); step(1); } break;
       case 'Enter': if (cinema) { e.preventDefault(); e.stopPropagation(); playVideo(state.videos[state.index]); } break;
       case 'c': case 'C': e.preventDefault(); e.stopPropagation(); setView(cinema ? 'grid' : 'cinema'); break;
+      case 'h': case 'H': if (cinema) { e.preventDefault(); e.stopPropagation(); toggleHd(); } break;
       default: return;
     }
   }
