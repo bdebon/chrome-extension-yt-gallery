@@ -38,13 +38,36 @@ The gallery loads the rest of the channel automatically as you scroll. Videos
 whose view count stands out from their batch get a 2 × 2 cell. When you go
 back from a video you launched from the gallery, it reopens at the same spot.
 
+## HD thumbnails in Cinema mode
+
+YouTube thumbnails top out at 1280 × 720: on a Retina screen, Cinema mode
+stretches them and they turn blurry. The extension upscales them ×2
+(2560 × 1440) **locally, on your GPU**, with a compact Real-ESRGAN
+super-resolution model (`realesr-general-x4v3`, ≈ 5 MB) run by ONNX Runtime Web
+through WebGPU. Nothing leaves your machine.
+
+- The 720p shows up immediately; the HD version fades in over it once ready
+  (≈ 3 s per image on an M1 Mac, neighbours are prepared ahead of time).
+- The model erases the grain of illustrations, so the high frequencies of the
+  original are added back on top (`GRAIN` in `offscreen.js`).
+- Results are kept in the extension's cache: an image is never computed twice.
+- Without WebGPU (or on any error), it silently stays at 720p.
+- Inference runs in an offscreen document (`chrome.offscreen`) because
+  YouTube's CSP forbids WebAssembly in the page.
+- Demo only: the **HD** chip in the header (or the `H` key) toggles the HD
+  layer to compare before / after.
+
 ## Development
 
-Vanilla, no build step. Three files:
+Vanilla, no build step:
 
-- `manifest.json` — Manifest V3, content script on `youtube.com`.
+- `manifest.json` — Manifest V3, content script on `youtube.com`, service worker, offscreen document.
 - `content.js` — detects the Videos tab, reads YouTube's DOM, renders the gallery.
 - `gallery.css` — gallery styles, rendered inside a Shadow DOM.
+- `background.js` — service worker; opens the offscreen document on demand.
+- `offscreen.html` / `offscreen.js` — thumbnail super-resolution (tiles, grain, cache, queue).
+- `vendor/ort/` — ONNX Runtime Web 1.29 (JSPI + WebGPU build, MIT, ≈ 16 MB).
+- `models/realesr-general-x4v3.onnx` — Real-ESRGAN model (BSD-3-Clause, Xintao Wang et al.).
 
 Load the repository folder as an unpacked extension; after each change hit ⟳
 on the extension card and reload the YouTube tab.
@@ -56,6 +79,8 @@ on the extension card and reload the YouTube tab.
 - Thumbnails top out at `maxresdefault.jpg` (1280 × 720), with a fallback to
   `hqdefault.jpg` when the HD variant does not exist (YouTube then returns a
   120 × 90 placeholder, detected through `naturalWidth`).
+- Super-resolution needs WebGPU and JSPI (Chrome ≥ 137); the extension pages
+  declare `'wasm-unsafe-eval'` in their CSP to load the runtime.
 
 ## Releases
 

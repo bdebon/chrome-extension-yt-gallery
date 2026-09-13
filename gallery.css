@@ -354,6 +354,8 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
   transition: opacity 0.9s ease;
 }
 .ytc-stage-frame img.is-loaded { opacity: 1; }
+/* Version agrandie par le GPU (offscreen.js) : elle vient se fondre par-dessus le 720p. */
+.ytc-stage-hd { transition-duration: 0.7s; }
 .ytc-play {
   position: absolute;
   inset: 0;
@@ -451,5 +453,5 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 
 @media (prefers-reduced-motion: reduce) {
   .ytc-card.is-ready, .ytc-top, .ytc-cap { animation: none !important; opacity: 1; }
-  .ytc-thumb, .ytc-thumb img, .ytc-bg { transition: none !important; }
+  .ytc-thumb, .ytc-thumb img, .ytc-bg, .ytc-stage-hd { transition: none !important; }
 }

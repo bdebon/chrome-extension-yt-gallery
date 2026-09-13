@@ -3,6 +3,13 @@
   "name": "YouTube Contemplatif",
   "version": "0.1.0",
   "description": "Un mode galerie contemplatif pour parcourir les chaînes YouTube d'ambiances et d'images générées.",
+  "permissions": ["offscreen"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
   "content_scripts": [
     {
       "matches": ["https://www.youtube.com/*"],

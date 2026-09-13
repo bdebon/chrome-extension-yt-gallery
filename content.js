@@ -30,6 +30,7 @@
     revealPtr: 0,           // prochain index à révéler (ordre de la grille)
     nextRevealAt: 0,        // horloge de cascade
     stallTimer: null,
+    hdToken: 0,             // identifie la vidéo affichée en Cinéma (ignore les HD arrivées trop tard)
   };
 
   /* ------------------------------------------------------------------ */
@@ -323,8 +324,9 @@
 
     // Cinéma
     const stageImg = h('img', { alt: '' });
+    const stageHd = h('img', { class: 'ytc-stage-hd', alt: '', decoding: 'async' });
     const stageFrame = h('div', { class: 'ytc-stage-frame', onclick: () => playVideo(state.videos[state.index]) },
-      stageImg,
+      stageImg, stageHd,
       h('div', { class: 'ytc-play' }, h('span', {}, svg(ICON_PLAY), 'Regarder')),
     );
     const prevBtn = h('button', { type: 'button', class: 'ytc-arrow is-prev', 'aria-label': 'Précédente', onclick: () => step(-1) }, svg(ICON_PREV, { stroke: true }));
@@ -352,7 +354,7 @@
     state.openedAt = performance.now();
     if (!resume) requestAnimationFrame(() => requestAnimationFrame(() => { host.style.opacity = '1'; }));
 
-    state.els = { wrap, bgA, bgB, top, grid, foot, spinner, moreBtn, footNote, cinema, stageImg, stageFrame, capTitle, capMeta, strip, seg, segGrid, segCinema, cap };
+    state.els = { wrap, bgA, bgB, top, grid, foot, spinner, moreBtn, footNote, cinema, stageImg, stageHd, stageFrame, capTitle, capMeta, strip, seg, segGrid, segCinema, cap };
 
     appendVideos(collectVideos());
 
@@ -637,6 +639,56 @@
     if (state.open) { appendVideos(fresh); updateFoot(); }
   }
 
+  /* --- super-résolution (voir offscreen.js) --- */
+  // Les miniatures plafonnent à 1280×720 : un document hors écran de
+  // l'extension les agrandit en ×2 sur le GPU (WebGPU). On affiche le 720p
+  // tout de suite et on fond vers la version HD quand elle arrive. Si le
+  // GPU n'est pas disponible, on reste silencieusement en 720p.
+  const HD_KEEP = 16; // images HD gardées en mémoire dans la page (≈ 0,5 Mo chacune)
+  const hd = { cache: new Map(), pending: new Map(), ready: null, disabled: false };
+
+  function hdSend(msg) {
+    try { return chrome.runtime.sendMessage(msg).catch(() => undefined); }
+    catch { return Promise.resolve(undefined); } // extension rechargée : contexte invalidé
+  }
+
+  function ensureHdWorker() {
+    if (!hd.ready) hd.ready = hdSend({ type: 'ytc-hd-ensure' });
+    return hd.ready;
+  }
+
+  function requestHd(video, priority) {
+    if (hd.disabled || !video || !chrome.runtime?.id) return Promise.resolve(null);
+    const hit = hd.cache.get(video.id);
+    if (hit) { hd.cache.delete(video.id); hd.cache.set(video.id, hit); return Promise.resolve(hit); }
+    if (hd.pending.has(video.id)) return hd.pending.get(video.id);
+    const msg = { type: 'ytc-hd', id: video.id, url: video.loadedSrc || video.src, fallback: video.fallback, priority };
+    const p = (async () => {
+      await ensureHdWorker();
+      let res = await hdSend(msg);
+      if (res === undefined) { hd.ready = null; await ensureHdWorker(); res = await hdSend(msg); } // document pas encore prêt
+      if (!res || !res.ok) { if (res && res.fatal) hd.disabled = true; return null; }
+      hd.cache.set(video.id, res.dataUrl);
+      while (hd.cache.size > HD_KEEP) hd.cache.delete(hd.cache.keys().next().value);
+      return res.dataUrl;
+    })().finally(() => hd.pending.delete(video.id));
+    hd.pending.set(video.id, p);
+    return p;
+  }
+
+  function showHd(video) {
+    const { stageHd } = state.els;
+    const token = ++state.hdToken;
+    stageHd.classList.remove('is-loaded');
+    stageHd.removeAttribute('src');
+    requestHd(video, 2).then((dataUrl) => {
+      if (!dataUrl || token !== state.hdToken || !state.open) return;
+      stageHd.onload = () => { if (token === state.hdToken) stageHd.classList.add('is-loaded'); };
+      stageHd.src = dataUrl;
+    });
+    for (const d of [1, -1]) { const nv = state.videos[state.index + d]; if (nv) requestHd(nv, 1); }
+  }
+
   /* --- cinéma --- */
   function showIndex(i) {
     const n = state.videos.length;
@@ -654,6 +706,7 @@
     };
     stageImg.addEventListener('load', onload);
     stageImg.src = v.loadedSrc || v.src;
+    showHd(v);
 
     capTitle.textContent = v.title;
     capMeta.textContent = [v.duration, v.meta].filter(Boolean).join('  ·  ');
