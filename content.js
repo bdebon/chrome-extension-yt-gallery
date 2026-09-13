@@ -121,6 +121,7 @@
   // est retenue dès qu'elle fait 1,25 × la médiane. Deux grandes cartes sont
   // toujours séparées d'au moins BIG_GAP - 1 vidéos, pour ne jamais se toucher.
   const BIG_GAP = 5;
+  const BATCH = 30; // taille des batchs YouTube
   function pickOutliers(list, base) {
     const withViews = list.map((v, i) => ({ v, i: base + i })).filter((x) => x.v.views > 0);
     if (withViews.length < 6) return new Set();
@@ -268,10 +269,12 @@
     return cssPromise;
   }
 
-  async function openGallery() {
+  async function openGallery(resume = null) {
     if (state.open) return;
     const css = await loadCss();
     if (state.open) return;
+    if (!resume) clearResume();
+    state.resuming = !!resume;
     state.open = true;
     state.view = 'grid';
     state.index = 0;
@@ -342,10 +345,11 @@
     // Rideau noir qui se ferme en fondu (350 ms) ; rien d'autre n'est visible
     // pendant ce temps, les cartes et l'en-tête n'arrivent qu'après.
     host.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:#0b0b0d;opacity:0;transition:opacity .35s ease';
+    if (resume) { wrap.classList.add('is-resume'); host.style.transition = 'none'; host.style.opacity = '1'; }
     root.append(h('style', { text: css }), wrap);
     document.documentElement.append(host);
     state.openedAt = performance.now();
-    requestAnimationFrame(() => requestAnimationFrame(() => { host.style.opacity = '1'; }));
+    if (!resume) requestAnimationFrame(() => requestAnimationFrame(() => { host.style.opacity = '1'; }));
 
     state.els = { wrap, bgA, bgB, top, grid, foot, spinner, moreBtn, footNote, cinema, stageImg, stageFrame, capTitle, capMeta, strip, segGrid, segCinema, cap };
 
@@ -354,10 +358,18 @@
     // Entrée en scène : rideau noir immédiat, puis le fond ambiant s'allume
     // (double rAF pour que la transition d'opacité soit bien jouée).
     const firstBg = info.banner || state.videos[0]?.fallback;
-    if (firstBg) requestAnimationFrame(() => requestAnimationFrame(() => { if (state.open) setBackdrop(firstBg); }));
+    if (firstBg && resume) {
+      // Fond posé sans transition, puis les fondus croisés reprennent au survol.
+      for (const bg of [bgA, bgB]) bg.style.transition = 'none';
+      setBackdrop(firstBg);
+      setTimeout(() => { for (const bg of [bgA, bgB]) bg.style.transition = ''; }, 100);
+    } else if (firstBg) {
+      requestAnimationFrame(() => requestAnimationFrame(() => { if (state.open) setBackdrop(firstBg); }));
+    }
     // Les cartes du premier écran apparaissent ensemble, en cascade, dès que
     // leurs images sont là (ou après 1,8 s au plus tard).
     setTimeout(finishIntro, INTRO_TIMEOUT);
+    if (resume) restorePosition(resume);
 
     document.addEventListener('keydown', onKeyDown, true);
     wrap.focus({ preventScroll: true });
@@ -381,7 +393,7 @@
     wrap.classList.add('is-closing');
     const host = state.host;
     // Sortie symétrique : le contenu s'éteint, puis le rideau s'ouvre en fondu.
-    setTimeout(() => { host.style.opacity = '0'; }, 200);
+    setTimeout(() => { host.style.transition = 'opacity .35s ease'; host.style.opacity = '0'; }, 200);
     setTimeout(() => host.remove(), 560);
     window.scrollTo({ top: state.scrollYBefore, behavior: 'instant' });
     state.host = null; state.root = null; state.els = {};
@@ -446,9 +458,10 @@
   const REVEAL_STEP = 55;   // ms entre deux cartes
   const STALL_TIMEOUT = 1200; // au-delà, on saute une image qui traîne
 
-  function revealCard(card, delay) {
+  function revealCard(card, delay, instant = false) {
     card.style.setProperty('--d', String(Math.round(delay)));
     card.classList.add('is-ready');
+    if (instant) card.classList.add('is-instant');
   }
 
   function scheduleReveal(card) {
@@ -460,6 +473,7 @@
 
   function onCardReady(card, index) {
     if (!state.open) return;
+    if (state.resuming) { revealCard(card, 0, true); return; }
     if (index < state.revealPtr) { scheduleReveal(card); return; } // sautée plus tôt, elle arrive enfin
     state.loadedCards.set(index, card);
     pumpReveals();
@@ -500,7 +514,12 @@
     if (!list.length) return;
     const { grid, strip } = state.els;
     const base = state.videos.length;
-    const big = pickOutliers(list, base);
+    // Sélection des « populaires » par tranches de 30, comme les batchs de
+    // YouTube : le résultat ne dépend pas du nombre de vidéos déjà en page.
+    const big = new Set();
+    for (let c = 0; c < list.length; c += BATCH) {
+      for (const id of pickOutliers(list.slice(c, c + BATCH), base + c)) big.add(id);
+    }
     for (let i = 0; i < list.length; i++) {
       const v = list[i];
       const idx = base + i;
@@ -559,8 +578,31 @@
     playVideo(video);
   }
 
+  const RESUME_KEY = 'ytc-resume';
+  function saveResume(video) {
+    try {
+      sessionStorage.setItem(RESUME_KEY, JSON.stringify({
+        path: location.pathname,
+        videoId: video?.id || null,
+        scrollTop: state.els.wrap?.scrollTop || 0,
+        view: state.view,
+        index: state.index,
+        count: state.videos.length,
+        ts: Date.now(),
+      }));
+    } catch (_) { /* stockage indisponible */ }
+  }
+  function readResume() {
+    try {
+      const r = JSON.parse(sessionStorage.getItem(RESUME_KEY) || 'null');
+      return r && r.path === location.pathname && Date.now() - r.ts < 6 * 3600e3 ? r : null;
+    } catch (_) { return null; }
+  }
+  function clearResume() { try { sessionStorage.removeItem(RESUME_KEY); } catch (_) { /* ignore */ } }
+
   function playVideo(video) {
     if (!video) return;
+    saveResume(video); // pour rouvrir la galerie au même endroit après un retour arrière
     closeGallery();
     // Réutilise le lien d'origine pour profiter de la navigation SPA de YouTube.
     if (video.anchor?.isConnected) video.anchor.click();
@@ -644,16 +686,57 @@
     }
   }
 
+  /* --- reprise après retour arrière --- */
+  async function restorePosition(resume) {
+    // Recharge la suite jusqu'à retrouver autant de vidéos qu'avant.
+    for (let guard = 0; guard < 20 && state.open && state.videos.length < resume.count && !state.exhausted; guard++) {
+      await loadMore();
+    }
+    if (!state.open) return;
+    if (resume.view === 'cinema') {
+      state.index = Math.min(resume.index, state.videos.length - 1);
+      setView('cinema');
+    } else {
+      state.els.wrap.scrollTop = resume.scrollTop;
+    }
+    clearResume();
+    // Repasse en mode normal (cascade) pour les chargements suivants.
+    setTimeout(() => { state.resuming = false; state.introDone = true; state.revealPtr = state.videos.length; }, 1500);
+  }
+
+  async function maybeResume() {
+    const resume = readResume();
+    if (!resume || state.open || !isVideosTab()) return;
+    const ok = await waitFor(() => document.querySelector('ytd-rich-item-renderer a[href*="/watch?v="]'), 5000);
+    if (!ok || state.open || !isVideosTab()) return;
+    openGallery(resume);
+  }
+
   /* ------------------------------------------------------------------ */
   /* Cycle de vie (YouTube est une SPA)                                  */
   /* ------------------------------------------------------------------ */
 
+  // Chemin de la page précédente (YouTube est une SPA, on suit les navigations).
+  let prevHref = location.href;
+
   function onNavigate() {
-    if (state.open) closeGallery();
+    const from = prevHref;
+    prevHref = location.href;
+    const changed = from !== location.href;
+    // YouTube émet parfois plusieurs yt-navigate-finish pour une même page :
+    // on ne ferme la galerie que si l'URL a réellement changé.
+    if (state.open && changed) closeGallery();
     // La barre de filtres arrive parfois après l'événement de navigation.
     ensureButton();
     setTimeout(() => ensureButton(), 800);
     setTimeout(() => ensureButton(true), 3000);
+    // Retour sur l'onglet Vidéos depuis la page de lecture de la vidéo lancée
+    // dans la galerie : on la rouvre au même endroit, sans animation.
+    if (isVideosTab() && changed) {
+      const resume = readResume();
+      const fromId = (from.match(/[?&]v=([\w-]{11})/) || [])[1];
+      if (resume && fromId && fromId === resume.videoId) maybeResume();
+    }
   }
 
   document.addEventListener('yt-navigate-finish', onNavigate);
@@ -667,4 +750,6 @@
 
   onNavigate();
   if (isVideosTab()) loadCss();
+  // Chargement complet de la page via le bouton Précédent du navigateur.
+  if (performance.getEntriesByType('navigation')[0]?.type === 'back_forward' && readResume()) maybeResume();
 })();

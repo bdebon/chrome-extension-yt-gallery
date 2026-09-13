@@ -41,6 +41,10 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 @keyframes ytc-fade { to { opacity: 1; } }
 @keyframes ytc-fade-out { from { opacity: 1; } to { opacity: 0; } }
 
+/* Reprise après retour arrière : tout est posé directement, sans animation. */
+.ytc.is-resume .ytc-top { animation: none !important; opacity: 1; }
+.ytc-card.is-instant { animation: none !important; opacity: 1; }
+
 /* ---------- Fond ambiant (miniature floutée) ---------- */
 .ytc-bg {
   position: fixed;
