@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name: ${{ steps.rp.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: rp
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  # Runs in the same workflow: a release created with GITHUB_TOKEN does not
+  # trigger other workflows, so the zip has to be built right here.
+  package:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+
+      - name: Build the extension zip
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          NAME="youtube-contemplatif-${TAG}"
+          # Every tracked file, minus what .gitattributes marks as export-ignore.
+          git archive --format=zip --prefix="${NAME}/" -o "${NAME}.zip" "${TAG}"
+          unzip -l "${NAME}.zip"
+
+      - name: Attach the zip to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: gh release upload "${TAG}" "youtube-contemplatif-${TAG}.zip" --clobber

@@ -1,47 +1,77 @@
 # YouTube Contemplatif
 
-Extension Chrome qui ajoute un bouton **Contempler** sur l'onglet *Vidéos* d'une chaîne
-YouTube et ouvre une galerie plein écran pensée pour les chaînes d'ambiances
-(images générées, sons planants, vidéos d'une heure).
+A Chrome extension that adds a **Contempler** button to the *Videos* tab of a
+YouTube channel and opens a full-screen, museum-like gallery. Built for
+ambient / AI-art channels: generated images, hour-long soundscapes, thumbnails
+that deserve better than YouTube's grid.
 
-## Installation (mode développeur)
+## Install
 
-1. Ouvrir `chrome://extensions` (dans Arc : `arc://extensions`).
-2. Activer **Mode développeur** (en haut à droite).
-3. Cliquer **Charger l'extension non empaquetée** et choisir ce dossier.
-4. Ouvrir une page chaîne, onglet Vidéos, par exemple
-   <https://www.youtube.com/@spiritual_brother/videos>.
-5. Le bouton **Contempler** apparaît à droite des filtres *Les plus récentes / Populaires / Les plus anciennes*.
+No Web Store listing (yet). Install it as an unpacked extension:
 
-Après chaque modification du code : bouton ⟳ sur la carte de l'extension dans
-`chrome://extensions`, puis recharger l'onglet YouTube.
+1. Download the latest `youtube-contemplatif-vX.Y.Z.zip` from the
+   [Releases page](https://github.com/bdebon/chrome-extension-yt-gallery/releases).
+2. Unzip it somewhere you will keep (Chrome loads the extension from that folder).
+3. Open `chrome://extensions` (Arc: `arc://extensions`), enable **Developer mode**.
+4. Click **Load unpacked** and pick the unzipped folder.
+5. Open a channel's Videos tab, e.g.
+   <https://www.youtube.com/@spiritual_brother/videos>. The **Contempler** chip
+   sits next to the *Latest / Popular / Oldest* filters.
 
-Pas de build, pas de dépendances : trois fichiers vanilla.
+Updates are not automatic: the gallery header shows a small badge when a newer
+release exists. Download it, unzip over the same folder, and hit ⟳ on the
+extension card.
 
-## Utilisation
+## Usage
 
-| Action | Effet |
+| Action | Effect |
 | --- | --- |
-| Clic sur une miniature | lance la vidéo (navigation YouTube, sans rechargement) |
-| Cmd + clic | ouvre la vidéo dans un nouvel onglet |
-| Clic droit sur une miniature | ouvre cette vidéo en mode Cinéma |
-| `C` | bascule Grille / Cinéma |
-| `←` `→` | vidéo précédente / suivante (Cinéma) |
-| `Entrée` | lance la vidéo affichée (Cinéma) |
-| `Échap` | Cinéma → Grille, puis Grille → quitter |
+| Click a thumbnail | plays the video (YouTube's own navigation, no reload) |
+| Cmd/Ctrl + click | opens the video in a new tab |
+| Right-click a thumbnail | opens that video in Cinema mode |
+| `C` | toggles Grid / Cinema |
+| `←` `→` | previous / next video (Cinema) |
+| `Enter` | plays the displayed video (Cinema) |
+| `Esc` | Cinema → Grid, then Grid → close |
 
-La galerie charge automatiquement la suite de la chaîne quand on approche du bas
-(elle fait défiler la page YouTube derrière elle pour déclencher le chargement).
+The gallery loads the rest of the channel automatically as you scroll. Videos
+whose view count stands out from their batch get a 2 × 2 cell. When you go
+back from a video you launched from the gallery, it reopens at the same spot.
 
-## Fichiers
+## Development
 
-- `manifest.json` : Manifest V3, script de contenu sur `youtube.com`.
-- `content.js` : détection de l'onglet Vidéos, lecture du DOM YouTube, galerie.
-- `gallery.css` : styles de la galerie (rendus dans un Shadow DOM, isolés de YouTube).
+Vanilla, no build step. Three files:
 
-## Contraintes techniques
+- `manifest.json` — Manifest V3, content script on `youtube.com`.
+- `content.js` — detects the Videos tab, reads YouTube's DOM, renders the gallery.
+- `gallery.css` — gallery styles, rendered inside a Shadow DOM.
 
-- YouTube impose **Trusted Types** : pas de `innerHTML`, tout est construit avec `createElement`.
-- YouTube est une SPA : le bouton est réinséré à chaque `yt-navigate-finish`.
-- Miniatures : `maxresdefault.jpg` avec repli sur `hqdefault.jpg` quand la HD n'existe pas
-  (YouTube renvoie alors un placeholder 120×90, détecté via `naturalWidth`).
+Load the repository folder as an unpacked extension; after each change hit ⟳
+on the extension card and reload the YouTube tab.
+
+### Constraints
+
+- YouTube enforces **Trusted Types**: no `innerHTML`, everything goes through `createElement`.
+- YouTube is a SPA: the button is re-inserted on every `yt-navigate-finish`.
+- Thumbnails top out at `maxresdefault.jpg` (1280 × 720), with a fallback to
+  `hqdefault.jpg` when the HD variant does not exist (YouTube then returns a
+  120 × 90 placeholder, detected through `naturalWidth`).
+
+## Releases
+
+Releases are cut by [Release Please](https://github.com/googleapis/release-please):
+every push to `main` updates a release pull request; merging it tags a version,
+bumps `manifest.json`, and attaches the extension zip to the GitHub release.
+
+Commit messages therefore follow [Conventional Commits](https://www.conventionalcommits.org/):
+`feat: …` for a minor bump, `fix: …` for a patch, `feat!: …` for a breaking change.
+Other prefixes (`chore:`, `docs:`, `refactor:`) do not trigger a release.
+
+## Contributing
+
+Issues and pull requests are welcome, in English or French. Keep the code
+vanilla and dependency-free unless there is a very good reason.
+
+## License
+
+[MIT](LICENSE)

@@ -301,6 +301,7 @@
 
     const segGrid = h('button', { type: 'button', class: 'is-active', text: 'Grille', onclick: () => setView('grid') });
     const segCinema = h('button', { type: 'button', text: 'Cinéma', onclick: () => setView('cinema') });
+    const seg = h('div', { class: 'ytc-seg' }, segGrid, segCinema);
 
     const top = h('div', { class: 'ytc-top' },
       info.avatar ? h('img', { class: 'ytc-avatar', src: info.avatar, alt: '' }) : null,
@@ -309,7 +310,7 @@
         h('div', { class: 'ytc-sub', text: info.meta || 'Mode contemplatif' }),
       ),
       h('div', { class: 'ytc-spacer' }),
-      h('div', { class: 'ytc-seg' }, segGrid, segCinema),
+      seg,
       h('button', { type: 'button', class: 'ytc-close', onclick: closeGallery },
         h('span', { text: 'Quitter' }), h('span', { class: 'ytc-kbd', text: 'Échap' })),
     );
@@ -351,7 +352,7 @@
     state.openedAt = performance.now();
     if (!resume) requestAnimationFrame(() => requestAnimationFrame(() => { host.style.opacity = '1'; }));
 
-    state.els = { wrap, bgA, bgB, top, grid, foot, spinner, moreBtn, footNote, cinema, stageImg, stageFrame, capTitle, capMeta, strip, segGrid, segCinema, cap };
+    state.els = { wrap, bgA, bgB, top, grid, foot, spinner, moreBtn, footNote, cinema, stageImg, stageFrame, capTitle, capMeta, strip, seg, segGrid, segCinema, cap };
 
     appendVideos(collectVideos());
 
@@ -374,6 +375,7 @@
     document.addEventListener('keydown', onKeyDown, true);
     wrap.focus({ preventScroll: true });
     loadCss(); // précharge pour les ouvertures suivantes
+    showUpdateBadge();
 
     // Chargement automatique en approchant du bas.
     const io = new IntersectionObserver((entries) => {
@@ -684,6 +686,51 @@
       case 'c': case 'C': e.preventDefault(); e.stopPropagation(); setView(cinema ? 'grid' : 'cinema'); break;
       default: return;
     }
+  }
+
+  /* --- update check --- */
+  // Unpacked extensions never auto-update: once per 6 hours, ask GitHub for the
+  // latest release and show a discreet badge in the header when it is newer.
+  const REPO = 'bdebon/chrome-extension-yt-gallery';
+  const UPDATE_KEY = 'ytc-update-check';
+  const UPDATE_TTL = 6 * 3600e3;
+
+  function currentVersion() {
+    try { return chrome.runtime.getManifest().version; } catch (_) { return null; }
+  }
+
+  // Returns > 0 when a is newer than b. Accepts "v1.2.3" or "1.2.3".
+  function compareVersions(a, b) {
+    const pa = String(a).replace(/^v/, '').split('.').map((n) => parseInt(n, 10) || 0);
+    const pb = String(b).replace(/^v/, '').split('.').map((n) => parseInt(n, 10) || 0);
+    for (let i = 0; i < 3; i++) { const d = (pa[i] || 0) - (pb[i] || 0); if (d) return d; }
+    return 0;
+  }
+
+  async function fetchLatestRelease() {
+    try {
+      const cached = JSON.parse(localStorage.getItem(UPDATE_KEY) || 'null');
+      if (cached && Date.now() - cached.ts < UPDATE_TTL) return cached;
+    } catch (_) { /* storage unavailable */ }
+    let info = { tag: null, url: null, ts: Date.now() };
+    try {
+      const r = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, { headers: { Accept: 'application/vnd.github+json' } });
+      if (r.ok) { const j = await r.json(); info = { tag: j.tag_name || null, url: j.html_url || null, ts: Date.now() }; }
+    } catch (_) { /* offline, rate-limited… try again later */ }
+    try { localStorage.setItem(UPDATE_KEY, JSON.stringify(info)); } catch (_) { /* ignore */ }
+    return info;
+  }
+
+  async function showUpdateBadge() {
+    const mine = currentVersion();
+    if (!mine) return;
+    const latest = await fetchLatestRelease();
+    if (!latest?.tag || !state.open || compareVersions(latest.tag, mine) <= 0) return;
+    const badge = h('a', {
+      class: 'ytc-update', href: latest.url || `https://github.com/${REPO}/releases`, target: '_blank', rel: 'noopener',
+      title: `Version installée : ${mine}. Cliquer pour télécharger la nouvelle version.`,
+    }, h('span', { class: 'ytc-update-dot' }), h('span', { text: `${latest.tag} disponible` }));
+    state.els.top.insertBefore(badge, state.els.seg);
   }
 
   /* --- reprise après retour arrière --- */
