@@ -1,9 +1,11 @@
 {
   "manifest_version": 3,
   "name": "YouTube Contemplatif",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Un mode galerie contemplatif pour parcourir les chaînes YouTube d'ambiances et d'images générées.",
-  "permissions": ["offscreen"],
+  "permissions": [
+    "offscreen"
+  ],
   "background": {
     "service_worker": "background.js"
   },
@@ -12,15 +14,23 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.youtube.com/*"],
-      "js": ["content.js"],
+      "matches": [
+        "https://www.youtube.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["gallery.css"],
-      "matches": ["https://www.youtube.com/*"]
+      "resources": [
+        "gallery.css"
+      ],
+      "matches": [
+        "https://www.youtube.com/*"
+      ]
     }
   ]
 }
